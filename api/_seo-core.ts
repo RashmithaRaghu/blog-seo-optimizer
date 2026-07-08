@@ -139,6 +139,52 @@ export async function fetchRobotsTxt(blogUrl: string): Promise<string | null> {
   return null;
 }
 
+// Fetch PageSpeed Insights data
+export async function fetchPageSpeedData(url: string): Promise<{ score: number; lcp: string; cls: string } | null> {
+  const apiKey = process.env.PAGESPEED_API_KEY;
+  if (!apiKey) {
+    console.warn("PAGESPEED_API_KEY environment variable is not defined.");
+    return null;
+  }
+  
+  // Only try to call the API for valid http/https URLs
+  if (!url.startsWith("http://") && !url.startsWith("https://")) {
+    console.warn("PageSpeed API skipped: URL is not a valid http/https protocol:", url);
+    return null;
+  }
+
+  const apiUrl = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(url)}&key=${apiKey}&strategy=mobile`;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 seconds timeout
+  
+  try {
+    const res = await fetch(apiUrl, { signal: controller.signal });
+    clearTimeout(timeoutId);
+    if (!res.ok) {
+      console.warn(`PageSpeed API returned status: ${res.status}`);
+      return null;
+    }
+    const data = await res.json();
+    const perfScore = data?.lighthouseResult?.categories?.performance?.score;
+    const lcp = data?.lighthouseResult?.audits?.["largest-contentful-paint"]?.displayValue || "N/A";
+    const cls = data?.lighthouseResult?.audits?.["cumulative-layout-shift"]?.displayValue || "N/A";
+    
+    if (typeof perfScore === "number") {
+      return {
+        score: Math.round(perfScore * 100),
+        lcp,
+        cls
+      };
+    }
+    return null;
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    console.warn("Failed to fetch PageSpeed data:", err?.message || err);
+    return null;
+  }
+}
+
+
 // Interface for SEO analysis result
 export interface SEOAnalysis {
   url: string;
@@ -223,8 +269,19 @@ export function calculateFleschReadingEase(text: string): { score: number; avgSe
 }
 
 // Core deterministic analyzer using Cheerio
-export function parseHtmlAndAnalyze(html: string, url: string, robotsTxt: string | null): SEOAnalysis {
+export async function parseHtmlAndAnalyze(
+  html: string,
+  url: string,
+  robotsTxt: string | null,
+  pageSpeedData?: { score: number; lcp: string; cls: string } | null
+): Promise<SEOAnalysis> {
+  let finalPageSpeed = pageSpeedData;
+  if (finalPageSpeed === undefined) {
+    finalPageSpeed = await fetchPageSpeedData(url);
+  }
+
   const $ = cheerio.load(html);
+
 
   // 1. Title Analysis
   const rawTitle = $("title").first().text().trim() || "";
@@ -695,40 +752,40 @@ export function parseHtmlAndAnalyze(html: string, url: string, robotsTxt: string
     status: b4Score >= 6 ? "Optimized" : (b4Score >= 3 ? "Needs Improvement" : "Critical"),
   });
 
-  // Benchmark 5: Lead Magnet & Conversions (max 8)
-  const b5Score = leadMagnetDetected ? 8 : 0;
+  // Benchmark 5: Lead Magnet & Conversions (max 4)
+  const b5Score = leadMagnetDetected ? 4 : 0;
   benchmarks.push({
     name: "Lead Capture & Conversion Signal",
     score: b5Score,
-    maxScore: 8,
+    maxScore: 4,
     details: leadMagnetDetected ? "Form or active conversion call-to-action detected." : "No newsletter signup or call-to-action detected.",
-    status: b5Score === 8 ? "Optimized" : "Critical",
+    status: b5Score === 4 ? "Optimized" : "Critical",
   });
 
-  // Benchmark 6: E-E-A-T Signals (max 8)
+  // Benchmark 6: E-E-A-T Signals (max 6)
   let b6Score = 0;
-  if (authorSignal) b6Score += 4;
-  if (dateSignal) b6Score += 4;
+  if (authorSignal) b6Score += 3;
+  if (dateSignal) b6Score += 3;
 
   benchmarks.push({
     name: "E-E-A-T Authority Verification",
     score: b6Score,
-    maxScore: 8,
+    maxScore: 6,
     details: `Author signature: ${authorSignal ? "Found" : "Missing"}. Freshness Date: ${dateSignal ? "Found" : "Missing"}.`,
-    status: b6Score === 8 ? "Optimized" : (b6Score >= 4 ? "Needs Improvement" : "Critical"),
+    status: b6Score === 6 ? "Optimized" : (b6Score >= 3 ? "Needs Improvement" : "Critical"),
   });
 
-  // Benchmark 7: Internal Link Ratio & Context (max 8)
+  // Benchmark 7: Internal Link Ratio & Context (max 6)
   let b7Score = 0;
   let linkDetails = "";
   if (internalLinksFlag === "healthy") {
-    b7Score = 8;
+    b7Score = 6;
     linkDetails = "Healthy internal linking structure (2-5 links).";
   } else if (internalLinksFlag === "moderate") {
-    b7Score = 5;
+    b7Score = 4;
     linkDetails = `Moderate internal linking (${internalLinksCount} links).`;
   } else if (internalLinksFlag === "excessive") {
-    b7Score = 2;
+    b7Score = 1;
     linkDetails = `Excessive internal links detected (${internalLinksCount}), risks diluting PageRank.`;
   } else {
     b7Score = 0;
@@ -738,59 +795,59 @@ export function parseHtmlAndAnalyze(html: string, url: string, robotsTxt: string
   benchmarks.push({
     name: "Internal Crawl & Link Signals",
     score: b7Score,
-    maxScore: 8,
+    maxScore: 6,
     details: linkDetails,
-    status: b7Score === 8 ? "Optimized" : (b7Score >= 5 ? "Needs Improvement" : "Critical"),
+    status: b7Score === 6 ? "Optimized" : (b7Score >= 4 ? "Needs Improvement" : "Critical"),
   });
 
-  // Benchmark 8: External Authority Outlinks (max 6)
+  // Benchmark 8: External Authority Outlinks (max 4)
   let b8Score = 0;
-  if (externalLinksCount >= 2) b8Score = 6;
-  else if (externalLinksCount === 1) b8Score = 3;
+  if (externalLinksCount >= 2) b8Score = 4;
+  else if (externalLinksCount === 1) b8Score = 2;
 
   benchmarks.push({
     name: "External Authority References",
     score: b8Score,
-    maxScore: 6,
+    maxScore: 4,
     details: `Found ${externalLinksCount} high-authority citation links.`,
-    status: b8Score === 6 ? "Optimized" : "Critical",
+    status: b8Score === 4 ? "Optimized" : "Critical",
   });
 
-  // Benchmark 9: FAQ Content Depth (max 6)
+  // Benchmark 9: FAQ Content Depth (max 4)
   let b9Score = 0;
   let faqDetails = "";
   if (!faqPresent) {
     b9Score = 0;
     faqDetails = "No strategic FAQ section found.";
   } else if (thinFaqAnswersCount > 0) {
-    b9Score = 3;
+    b9Score = 2;
     faqDetails = `FAQ section is present, but has thin answers (< 50 words) on ${thinFaqAnswersCount} items.`;
   } else {
-    b9Score = 6;
+    b9Score = 4;
     faqDetails = `Healthy FAQ section with ${faqQuestions.length} detailed question answers.`;
   }
 
   benchmarks.push({
     name: "AEO FAQ Content Integrity",
     score: b9Score,
-    maxScore: 6,
+    maxScore: 4,
     details: faqDetails,
-    status: b9Score === 6 ? "Optimized" : (b9Score > 0 ? "Needs Improvement" : "Critical"),
+    status: b9Score === 4 ? "Optimized" : (b9Score > 0 ? "Needs Improvement" : "Critical"),
   });
 
-  // Benchmark 10: Technical Core Infrastructure (max 6)
+  // Benchmark 10: Technical Core Infrastructure (max 4)
   let b10Score = 0;
-  if (hasHttps === "Present") b10Score += 2;
-  if (canonicalStatus === "Present") b10Score += 2;
+  if (hasHttps === "Present") b10Score += 1;
+  if (canonicalStatus === "Present") b10Score += 1;
   if (viewportStatus === "Present") b10Score += 1;
   if (langStatus === "Present") b10Score += 1;
 
   benchmarks.push({
     name: "Core Technical Meta Health",
     score: b10Score,
-    maxScore: 6,
+    maxScore: 4,
     details: `HTTPS: ${hasHttps}, Canonical: ${canonicalStatus}, Viewport: ${viewportStatus}, Lang: ${langStatus}.`,
-    status: b10Score === 6 ? "Optimized" : (b10Score >= 4 ? "Needs Improvement" : "Critical"),
+    status: b10Score === 4 ? "Optimized" : (b10Score >= 3 ? "Needs Improvement" : "Critical"),
   });
 
   // Benchmark 11: Shareability Signals (max 5)
@@ -859,6 +916,34 @@ export function parseHtmlAndAnalyze(html: string, url: string, robotsTxt: string
     maxScore: 4,
     details: `Images: ${imageCount}, With Alt: ${imagesWithAlt}, Generic file names: ${imagesGenericName}.`,
     status: b14Score === 4 ? "Optimized" : (b14Score >= 2 ? "Needs Improvement" : "Critical"),
+  });
+
+  // Benchmark 15: Page Speed (max 8)
+  let b15Score = 0;
+  let pageSpeedDetails = "Requires external PageSpeed Insights API key integration. (Could not fetch performance score).";
+  let pageSpeedStatus = "Not Measurable";
+
+  if (finalPageSpeed) {
+    b15Score = Math.round((finalPageSpeed.score / 100) * 8);
+    pageSpeedDetails = `Performance Score: ${finalPageSpeed.score}/100. LCP: ${finalPageSpeed.lcp}, CLS: ${finalPageSpeed.cls}.`;
+    pageSpeedStatus = b15Score >= 7 ? "Optimized" : (b15Score >= 4 ? "Needs Improvement" : "Critical");
+  }
+
+  benchmarks.push({
+    name: "Page Speed",
+    score: b15Score,
+    maxScore: 8,
+    details: pageSpeedDetails,
+    status: pageSpeedStatus,
+  });
+
+  // Benchmark 16: Backlinks Planning (Structurally capped - max 6)
+  benchmarks.push({
+    name: "Backlinks Planning",
+    score: 0,
+    maxScore: 6,
+    details: "Requires external backlink data provider (e.g. Ahrefs/Moz API) integration.",
+    status: "Capped",
   });
 
   // Calculate Total Score (Weighted sum out of 100 max)

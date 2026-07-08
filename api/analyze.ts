@@ -1,4 +1,4 @@
-import { fetchBlogHtml, fetchRobotsTxt, parseHtmlAndAnalyze } from "./_seo-core.js";
+import { fetchBlogHtml, fetchRobotsTxt, fetchPageSpeedData, parseHtmlAndAnalyze } from "./_seo-core.js";
 
 export default async function handler(req: any, res: any) {
   // Support POST requests as expected by the frontend
@@ -12,9 +12,12 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    const html = await fetchBlogHtml(url);
-    const robotsTxt = await fetchRobotsTxt(url);
-    const analysis = parseHtmlAndAnalyze(html, url, robotsTxt);
+    const [html, robotsTxt, pageSpeedData] = await Promise.all([
+      fetchBlogHtml(url),
+      fetchRobotsTxt(url),
+      fetchPageSpeedData(url).catch(() => null), // gracefully swallow PageSpeed fetch error to avoid breaking main flow
+    ]);
+    const analysis = await parseHtmlAndAnalyze(html, url, robotsTxt, pageSpeedData);
     return res.json({ analysis });
   } catch (err: any) {
     console.error("Analysis failed:", err);

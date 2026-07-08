@@ -4,6 +4,7 @@ import {
   getGeminiClient,
   fetchBlogHtml,
   fetchRobotsTxt,
+  fetchPageSpeedData,
   parseHtmlAndAnalyze,
   generateContentWithRetry,
   validateAndRefineDraft,
@@ -26,9 +27,13 @@ export default async function handler(req: any, res: any) {
     const ai = getGeminiClient();
 
     // 1. Analyze target blog
-    const mainHtml = await fetchBlogHtml(url);
-    const mainRobotsTxt = await fetchRobotsTxt(url);
-    const originalAnalysis = parseHtmlAndAnalyze(mainHtml, url, mainRobotsTxt);
+    const [mainHtml, mainRobotsTxt, pageSpeedData] = await Promise.all([
+      fetchBlogHtml(url),
+      fetchRobotsTxt(url),
+      fetchPageSpeedData(url).catch(() => null),
+    ]);
+    const originalAnalysis = await parseHtmlAndAnalyze(mainHtml, url, mainRobotsTxt, pageSpeedData);
+
 
     // Extract paragraphs content for rewriting source
     const $ = cheerio.load(mainHtml);
@@ -50,7 +55,7 @@ export default async function handler(req: any, res: any) {
       try {
         const compHtml = await fetchBlogHtml(finalCompetitorUrl);
         const compRobotsTxt = await fetchRobotsTxt(finalCompetitorUrl);
-        competitorAnalysis = parseHtmlAndAnalyze(compHtml, finalCompetitorUrl, compRobotsTxt);
+        competitorAnalysis = await parseHtmlAndAnalyze(compHtml, finalCompetitorUrl, compRobotsTxt, null);
         scoredCompetitors.push({
           url: finalCompetitorUrl,
           score: competitorAnalysis.score,
@@ -114,7 +119,7 @@ export default async function handler(req: any, res: any) {
           try {
             const compHtml = await fetchBlogHtml(compUrl);
             const compRobotsTxt = await fetchRobotsTxt(compUrl);
-            const analysis = parseHtmlAndAnalyze(compHtml, compUrl, compRobotsTxt);
+            const analysis = await parseHtmlAndAnalyze(compHtml, compUrl, compRobotsTxt, null);
             scoredCompetitors.push({
               url: compUrl,
               score: analysis.score,
@@ -146,7 +151,7 @@ export default async function handler(req: any, res: any) {
           try {
             const compHtml = await fetchBlogHtml(compUrl);
             const compRobotsTxt = await fetchRobotsTxt(compUrl);
-            const analysis = parseHtmlAndAnalyze(compHtml, compUrl, compRobotsTxt);
+            const analysis = await parseHtmlAndAnalyze(compHtml, compUrl, compRobotsTxt, null);
             scoredCompetitors.push({
               url: compUrl,
               score: analysis.score,
@@ -342,7 +347,7 @@ Return JSON matching this exact schema:
 
       // Build mock HTML and run deterministic analysis
       const mockHtml = buildHtmlFromDraft(parsedDraft, url);
-      const tempAnalysis = parseHtmlAndAnalyze(mockHtml, url, mainRobotsTxt);
+      const tempAnalysis = await parseHtmlAndAnalyze(mockHtml, url, mainRobotsTxt, pageSpeedData);
 
       const hasSubheadings = tempAnalysis.headings.some(h => h.tag === "h2" || h.tag === "h3");
       const hasFAQ = parsedDraft.faq && parsedDraft.faq.length > 0;
@@ -391,7 +396,7 @@ Return JSON matching this exact schema:
     console.log("Running absolute final verification step on finalDraft...");
     finalDraft = await validateAndRefineDraft(finalDraft, ai);
     const finalMockHtml = buildHtmlFromDraft(finalDraft, url);
-    finalAnalysis = parseHtmlAndAnalyze(finalMockHtml, url, mainRobotsTxt);
+    finalAnalysis = await parseHtmlAndAnalyze(finalMockHtml, url, mainRobotsTxt, pageSpeedData);
     console.log("Final verification step complete. Final Score:", finalAnalysis.score);
 
     // Determine improvements list
