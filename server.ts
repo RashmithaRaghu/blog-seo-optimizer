@@ -7,7 +7,7 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-const app = express();
+export const app = express();
 const PORT = 3000;
 
 app.use(express.json({ limit: "10mb" }));
@@ -1450,7 +1450,7 @@ function buildHtmlFromDraft(draft: { title: string; metaDescription: string; bod
 }
 
 // API Routes
-app.post("/api/analyze", async (req, res) => {
+export async function analyzeHandler(req: any, res: any) {
   const { url } = req.body;
   if (!url) {
     return res.status(400).json({ error: "Blog URL is required." });
@@ -1468,9 +1468,11 @@ app.post("/api/analyze", async (req, res) => {
       errorType: err.type || "failed",
     });
   }
-});
+}
 
-app.post("/api/optimize", async (req, res) => {
+app.post("/api/analyze", analyzeHandler);
+
+export async function optimizeHandler(req: any, res: any) {
   const { url, competitorUrl, topic } = req.body;
   if (!url) {
     return res.status(400).json({ error: "Blog URL is required for optimization." });
@@ -1899,7 +1901,9 @@ Return JSON matching this exact schema:
       errorType: err.type || "failed",
     });
   }
-});
+}
+
+app.post("/api/optimize", optimizeHandler);
 
 // Vite middleware and fallbacks setup
 async function startServer() {
@@ -1926,4 +1930,6 @@ async function startServer() {
   });
 }
 
-startServer();
+if (!process.env.VERCEL) {
+  startServer();
+}
