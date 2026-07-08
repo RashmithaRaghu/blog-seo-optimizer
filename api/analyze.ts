@@ -1,4 +1,4 @@
-import { fetchBlogHtml, fetchRobotsTxt, parseHtmlAndAnalyze } from "./_seo-core";
+import { fetchBlogHtml, fetchRobotsTxt, parseHtmlAndAnalyze } from "./_seo-core.js";
 
 export default async function handler(req: any, res: any) {
   // Support POST requests as expected by the frontend

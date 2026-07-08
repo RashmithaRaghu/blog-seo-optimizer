@@ -9,7 +9,7 @@ import {
   validateAndRefineDraft,
   buildHtmlFromDraft,
   SEOAnalysis
-} from "./_seo-core";
+} from "./_seo-core.js";
 
 export default async function handler(req: any, res: any) {
   // Support POST requests as expected by the frontend
