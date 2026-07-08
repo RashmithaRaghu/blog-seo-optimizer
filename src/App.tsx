@@ -296,17 +296,23 @@ export default function App() {
   };
 
   const isPageSpeedMeasured = cachedAnalysis?.benchmarks?.find(b => b.name === "Page Speed")?.status !== "Not Measurable";
-  const apiDisclaimer = isPageSpeedMeasured 
-    ? `(${cachedAnalysis.score}/94 achievable without off-page backlink APIs)`
-    : `(${cachedAnalysis.score}/86 achievable without external APIs)`;
+  const apiDisclaimer = cachedAnalysis 
+    ? (isPageSpeedMeasured 
+        ? `(${cachedAnalysis.score}/94 achievable without off-page backlink APIs)`
+        : `(${cachedAnalysis.score}/86 achievable without external APIs)`)
+    : "";
 
   const isOptPageSpeedMeasured = cachedOptimization?.optimizedAnalysis?.benchmarks?.find(b => b.name === "Page Speed")?.status !== "Not Measurable";
-  const optOriginalDisclaimer = isOptPageSpeedMeasured
-    ? `(${cachedOptimization.originalAnalysis.score}/94 achievable without off-page backlink APIs)`
-    : `(${cachedOptimization.originalAnalysis.score}/86 achievable without external APIs)`;
-  const optOptimizedDisclaimer = isOptPageSpeedMeasured
-    ? `(${cachedOptimization.optimizedAnalysis.score}/94 achievable without off-page backlink APIs)`
-    : `(${cachedOptimization.optimizedAnalysis.score}/86 achievable without external APIs)`;
+  const optOriginalDisclaimer = cachedOptimization 
+    ? (isOptPageSpeedMeasured
+        ? `(${cachedOptimization.originalAnalysis.score}/94 achievable without off-page backlink APIs)`
+        : `(${cachedOptimization.originalAnalysis.score}/86 achievable without external APIs)`)
+    : "";
+  const optOptimizedDisclaimer = cachedOptimization 
+    ? (isOptPageSpeedMeasured
+        ? `(${cachedOptimization.optimizedAnalysis.score}/94 achievable without off-page backlink APIs)`
+        : `(${cachedOptimization.optimizedAnalysis.score}/86 achievable without external APIs)`)
+    : "";
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] text-slate-800 font-sans antialiased pb-16 flex flex-col justify-between">
