@@ -17,6 +17,21 @@ app.use(express.json({ limit: "10mb" }));
 app.post("/api/analyze", analyzeHandler);
 app.post("/api/optimize", optimizeHandler);
 
+// Global error-handling middleware to prevent HTML fallbacks on errors
+app.use((err: any, req: any, res: any, next: any) => {
+  console.error("Unhandled server error:", err);
+  let status = 500;
+  if (err && typeof err.status === "number" && err.status >= 100 && err.status <= 599) {
+    status = err.status;
+  } else if (err && typeof err.statusCode === "number" && err.statusCode >= 100 && err.statusCode <= 599) {
+    status = err.statusCode;
+  }
+  res.status(status).json({
+    error: err.message || "An unexpected server-side error occurred.",
+    errorType: err.type || "failed",
+  });
+});
+
 async function startServer() {
   if (process.env.DISABLE_HMR === "true") {
     console.log("HMR is disabled via environment variable.");

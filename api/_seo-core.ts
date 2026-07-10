@@ -37,22 +37,42 @@ export async function generateContentWithRetry(
   let currentDelay = initialDelayMs;
   let primaryModel = params.model || "gemini-3.5-flash";
   const fallbackModel = "gemini-3.1-flash-lite";
+  let currentModel = primaryModel;
 
   while (true) {
     try {
-      const callParams = { ...params };
-      if (attempt >= maxRetries && primaryModel !== fallbackModel) {
-        console.warn(`All ${maxRetries} retries exhausted for ${primaryModel}. Falling back to ${fallbackModel}...`);
-        callParams.model = fallbackModel;
-      }
+      const callParams = { ...params, model: currentModel };
       return await ai.models.generateContent(callParams);
     } catch (err: any) {
       const errString = String(err?.message || err || "");
+      
+      // Check if it's a permanent daily free-tier quota exhaustion
+      const isQuotaExceeded =
+        errString.includes("RESOURCE_EXHAUSTED") ||
+        errString.includes("Quota exceeded") ||
+        errString.includes("quotaId") ||
+        errString.toLowerCase().includes("quota") ||
+        errString.toLowerCase().includes("exhausted");
+
+      if (isQuotaExceeded) {
+        if (currentModel.includes("gemini-3.5-flash")) {
+          console.warn(`Daily quota exceeded for ${currentModel}. Falling back immediately to ${fallbackModel}...`);
+          currentModel = fallbackModel;
+          attempt = 0;
+          continue;
+        } else {
+          console.error(`Gemini quota exceeded permanently for all models: ${errString}`);
+          const quotaErr: any = new Error(err?.message || errString);
+          quotaErr.status = 429;
+          quotaErr.type = "quota";
+          throw quotaErr;
+        }
+      }
+
       const isRetriable =
         errString.includes("503") ||
         errString.includes("UNAVAILABLE") ||
         errString.includes("429") ||
-        errString.includes("RESOURCE_EXHAUSTED") ||
         errString.includes("rate limit") ||
         errString.includes("high demand") ||
         errString.includes("overloaded");
@@ -62,7 +82,13 @@ export async function generateContentWithRetry(
       }
 
       attempt++;
-      if (attempt > maxRetries + 1) {
+      if (attempt > maxRetries) {
+        if (currentModel === primaryModel && primaryModel !== fallbackModel) {
+          console.warn(`All ${maxRetries} retries exhausted for ${primaryModel}. Falling back to ${fallbackModel}...`);
+          currentModel = fallbackModel;
+          attempt = 0;
+          continue;
+        }
         console.error(`Gemini call failed permanently after retries and fallback: ${errString}`);
         throw err;
       }
@@ -70,7 +96,7 @@ export async function generateContentWithRetry(
       const jitter = 1 + Math.random() * 0.2;
       const waitTime = Math.round(currentDelay * jitter);
       console.warn(
-        `Gemini call failed with retriable error (Attempt ${attempt}/${maxRetries}). Retrying in ${waitTime}ms... Error: ${errString}`
+        `Gemini call failed with retriable error (Attempt ${attempt}/${maxRetries} on ${currentModel}). Retrying in ${waitTime}ms... Error: ${errString}`
       );
       await delay(waitTime);
       currentDelay *= 2;
@@ -1366,9 +1392,31 @@ export async function validateAndRefineDraft(draft: any, ai: any): Promise<any> 
   return refined;
 }
 
+function unescapeHtml(html: string): string {
+  if (!html) return "";
+  return html
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+}
+
 export function buildHtmlFromDraft(draft: { title: string; metaDescription: string; body: string; faq: { question: string; answer: string }[]; schemaJson: string }, url: string): string {
-  let htmlBody = draft.body;
+  let htmlBody = unescapeHtml(draft.body);
   
+  // Ensure clear block boundaries around HTML headings and block elements to prevent inline merging
+  htmlBody = htmlBody.replace(/(<h[1-6][^>]*>.*?<\/h[1-6]>)/gis, "\n\n$1\n\n");
+  htmlBody = htmlBody.replace(/(<p[^>]*>.*?<\/p>)/gis, "\n\n$1\n\n");
+  htmlBody = htmlBody.replace(/(<(ul|ol)[^>]*>.*?<\/\2>)/gis, "\n\n$1\n\n");
+  htmlBody = htmlBody.replace(/(<blockquote[^>]*>.*?<\/blockquote>)/gis, "\n\n$1\n\n");
+  
+  // Ensure Markdown headings are separated from surrounding content by block boundaries
+  htmlBody = htmlBody.replace(/^(\s*#{1,6}\s+.+)$/gm, "\n\n$1\n\n");
+
+  // Clean up multiple newlines to double newlines
+  htmlBody = htmlBody.replace(/\n{3,}/g, "\n\n");
+
   htmlBody = htmlBody.replace(/^#\s+(.+)$/gm, "<h1>$1</h1>");
   htmlBody = htmlBody.replace(/^##\s+(.+)$/gm, "<h2>$1</h2>");
   htmlBody = htmlBody.replace(/^###\s+(.+)$/gm, "<h3>$1</h3>");
@@ -1376,7 +1424,18 @@ export function buildHtmlFromDraft(draft: { title: string; metaDescription: stri
   const paragraphs = htmlBody.split("\n\n").map((p) => {
     const trimmed = p.trim();
     if (!trimmed) return "";
-    if (trimmed.startsWith("<h") || trimmed.startsWith("<ul") || trimmed.startsWith("<ol") || trimmed.startsWith("<li") || trimmed.startsWith("<script")) {
+    
+    const lower = trimmed.toLowerCase();
+    if (
+      lower.startsWith("<h") || 
+      lower.startsWith("<ul") || 
+      lower.startsWith("<ol") || 
+      lower.startsWith("<li") || 
+      lower.startsWith("<div") || 
+      lower.startsWith("<blockquote") || 
+      lower.startsWith("<section") || 
+      lower.startsWith("<script")
+    ) {
       return trimmed;
     }
     return `<p>${trimmed}</p>`;
@@ -1401,12 +1460,6 @@ export function buildHtmlFromDraft(draft: { title: string; metaDescription: stri
         "mainEntityOfPage": url,
         "headline": draft.title,
         "description": draft.metaDescription,
-        "datePublished": "2026-07-07T08:00:00+00:00",
-        "dateModified": "2026-07-07T09:00:00+00:00",
-        "author": {
-          "@type": "Person",
-          "name": "SEO Expert"
-        },
         "publisher": {
           "@type": "Organization",
           "name": "Trilliant Digital",
@@ -1509,9 +1562,7 @@ export function buildHtmlFromDraft(draft: { title: string; metaDescription: stri
       <meta name="viewport" content="width=device-width, initial-scale=1">
       <link rel="canonical" href="${url}">
       <meta name="robots" content="index, follow">
-      <meta name="author" content="SEO Expert">
-      <meta name="date" content="2026-07-07">
-      <link rel="icon" href="/favicon.ico">
+      <link class="favicon" rel="icon" href="/favicon.ico">
       
       <!-- OpenGraph Metadata -->
       <meta property="og:title" content="${draft.title}">
@@ -1536,9 +1587,6 @@ export function buildHtmlFromDraft(draft: { title: string; metaDescription: stri
     <body>
       <article>
         <h1>${draft.title}</h1>
-        <div class="meta-byline">
-          By SEO Expert | Published July 7, 2026 | Last Updated July 7, 2026
-        </div>
         
         ${imagesHtml}
         

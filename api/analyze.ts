@@ -21,7 +21,17 @@ export default async function handler(req: any, res: any) {
     return res.json({ analysis });
   } catch (err: any) {
     console.error("Analysis failed:", err);
-    return res.status(err.status || 500).json({
+    let statusCode = 500;
+    const status = err.status || err.statusCode;
+    if (typeof status === "number" && status >= 100 && status <= 599) {
+      statusCode = status;
+    } else if (typeof status === "string") {
+      const parsed = parseInt(status, 10);
+      if (!isNaN(parsed) && parsed >= 100 && parsed <= 599) {
+        statusCode = parsed;
+      }
+    }
+    return res.status(statusCode).json({
       error: err.message || "Failed to analyze blog SEO.",
       errorType: err.type || "failed",
     });

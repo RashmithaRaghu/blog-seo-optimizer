@@ -18,10 +18,14 @@ export default async function handler(req: any, res: any) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const { url, competitorUrl, topic } = req.body;
+  const { url, competitorUrl, topic, realAuthorName, realInternalLinks } = req.body;
   if (!url) {
     return res.status(400).json({ error: "Blog URL is required for optimization." });
   }
+
+  const parsedInternalLinks = realInternalLinks
+    ? String(realInternalLinks).split(",").map((l: string) => l.trim()).filter(Boolean)
+    : [];
 
   try {
     const ai = getGeminiClient();
@@ -64,7 +68,17 @@ export default async function handler(req: any, res: any) {
           title: competitorAnalysis.title,
         });
       } catch (err: any) {
-        return res.status(err.status || 500).json({
+        let statusCode = 500;
+        const status = err.status || err.statusCode;
+        if (typeof status === "number" && status >= 100 && status <= 599) {
+          statusCode = status;
+        } else if (typeof status === "string") {
+          const parsed = parseInt(status, 10);
+          if (!isNaN(parsed) && parsed >= 100 && parsed <= 599) {
+            statusCode = parsed;
+          }
+        }
+        return res.status(statusCode).json({
           error: `Failed to fetch/analyze the specified competitor URL: ${err.message}`,
           errorType: err.type || "failed",
         });
@@ -144,7 +158,7 @@ export default async function handler(req: any, res: any) {
         const stableSources = [
           "https://github.blog/news-insights/",
           "https://wordpress.org/news/",
-          "https://www.w3.org/blog/",
+          "https://web.dev/blog/",
         ];
         for (const compUrl of stableSources) {
           if (scoredCompetitors.length >= 3) break;
@@ -266,8 +280,12 @@ Return JSON matching this exact structure:
           },
         },
         schemaJson: { type: Type.STRING },
+        requiresHumanReview: {
+          type: Type.ARRAY,
+          items: { type: Type.STRING }
+        }
       },
-      required: ["title", "metaDescription", "body", "faq", "schemaJson"],
+      required: ["title", "metaDescription", "body", "faq", "schemaJson", "requiresHumanReview"],
     };
 
     const attemptsDiagnostics: any[] = [];
@@ -277,7 +295,13 @@ Return JSON matching this exact structure:
       const currentWeaknesses = finalAnalysis ? finalAnalysis.recommendations.join("; ") : "N/A";
       
       const rewritePrompt = `
-You are a master SEO Writer. Rewrite the user's content completely to produce a search-ready, high-ranking, and highly optimized copy that conforms to the Trilliant Digital SEO/AEO standards.
+You are a master SEO Writer. Enhance the user's content to produce a search-ready, high-ranking, and highly optimized copy that conforms to the Trilliant Digital SEO/AEO standards.
+
+CRITICAL FORMAT & STRUCTURE PRESERVATION REQUIREMENT:
+- Do not reorganize, re-order, or restructure the content into new sections.
+- Keep the same section order and general structure as the original blog.
+- Only make the specific SEO improvements needed: fix heading tag levels (H1/H2/H3) if they're structurally wrong, tighten the title and meta description to the correct character range, and improve keyword usage and clarity WITHIN the existing structure.
+- Do not invent new sections or reorganize existing ones unless a heading is genuinely missing a required H2/H3 level.
 
 Original Title: "${originalAnalysis.title}"
 Original URL: ${originalAnalysis.url}
@@ -293,26 +317,53 @@ Gap Analysis Findings:
 - SEO Gaps: ${gapData.gaps ? gapData.gaps.join(", ") : "None"}
 - Previous Attempt Score Weaknesses (if any): ${currentWeaknesses}
 
-CRITICAL TRILLIANT DIGITAL SEO/AEO STANDARDS & GUIDELINES:
-1. Title: Provide an optimized title of 1 to 60 characters (not 50-60, under 60 is Good).
-2. Meta Description: Provide an optimized meta description of EXACTLY 150 to 160 characters. This is a hard requirement.
-3. Content Depth: Write a deeply comprehensive, high-quality article/page in clean Markdown. The word count MUST be at least ${origTargetMinWordCount} words (e.g., generate around ${origTargetMinWordCount + 150} words).
-4. Headings & Length Constraints:
+CRITICAL QUALITY, HONESTY, AND TRUTHFULNESS CONSTRAINTS:
+
+1. STRICT GROUNDING - NO FABRICATED CONTENT OF ANY KIND:
+   - Do not invent new sections, claims, statistics, features, processes, or certifications not present in the original.
+   - Do not invent internal link paths or external citations. If the content genuinely needs citations to support a specific existing claim, only add them if you are confident the source is real and directly relevant — otherwise omit.
+   - Only expand on themes, points, and topics that are already present in the original source content. You may elaborate, add depth, and improve structure — but do NOT introduce entirely new subtopics, claims, or specific practices (e.g. certifications, processes, statistics) that aren't grounded in the original text. If the target word count can't be reached by expanding on what's genuinely there, expand depth on EXISTING points (more detail, examples, explanation) rather than inventing new sections. It is better to fall short of the target word count than to fabricate content.
+
+2. REMOVE AUTHOR BYLINE AND DATE ENTIRELY:
+   - Do NOT generate, require, or display any "By [Author]" or "Published on [date]" line.
+   - There should be no author or publication date line anywhere in the body, headings, metadata, or structured schema.
+
+3. NO FAKE INTERNAL LINKS:
+   ${
+     parsedInternalLinks.length > 0
+       ? `Include relative internal links to the following actual paths: ${parsedInternalLinks.map(l => `"${l}"`).join(", ")}.`
+       : `Do NOT invent internal link paths like "/solutions" or "/training". Since no real internal links are provided, OMIT the internal links section entirely.`
+   }
+
+4. SPECIFIC, VERIFIABLE CITATIONS:
+   Every external citation must be attached to a specific, checkable claim — not a vague generalization. Bad: "standards are evolving [ISO]." Good: "the ISO 52900 standard defines seven categories of additive manufacturing processes [ISO]." If you cannot make a citation this specific, remove it rather than keep a vague one just to hit a link-count requirement.
+
+5. FAQ MUST BE GENUINELY DERIVED FROM CONTENT:
+   - Every FAQ question and answer must be directly extractable from or clearly grounded in what this specific blog actually discusses.
+   - Do NOT generate generic industry FAQs.
+   - Before including a question, verify: "Is the answer to this actually contained in or directly implied by the original blog content?" If not, do not include it.
+   - If there isn't enough source material to write 5 genuinely relevant FAQ questions, generate fewer (e.g., 2 to 4) rather than padding with generic ones.
+   - Each question must end with a "?" and each answer must be between 50 and 150 words.
+
+6. PRIORITIZE SUBSTANTIVE QUALITY OVER CHECKLISTS:
+   - Prioritize substantive improvements that genuinely help this content rank and read well: a clear, keyword-relevant title within 60 chars, an accurate meta description within 150-160 chars, correct heading hierarchy, natural keyword usage, and improved clarity/depth on points already present in the original.
+   - Do not add filler content, forms, fake CTAs, or unrelated sections just to satisfy a benchmark score. If a benchmark (e.g. Lead Magnets) doesn't genuinely apply to this content, it's fine for that score to stay low. Accuracy and truthfulness are far more important than a checklist score.
+
+7. REQUIRES HUMAN REVIEW LIST:
+   Identify and list any elements that require human check/verification before publishing in the "requiresHumanReview" array.
+   - If no real internal links are provided, you may include: "add 2-5 real internal links from the actual site".
+   - List any specific facts, claims, or citations that should be verified.
+
+CRITICAL SECTIONS & FORMATS:
+1. Title: Provide an optimized title of 1 to 60 characters.
+2. Meta Description: Provide an optimized meta description of EXACTLY 150 to 160 characters.
+3. Headings:
    - Must contain EXACTLY ONE H1 element matching the title.
    - All H2 headings MUST be between 50 and 70 characters.
    - All H3 headings MUST be between 40 and 60 characters.
-   - Demote or adjust headings to meet these precise length limits.
-   - NO HEADING LEVEL SKIPS are allowed (e.g. do not jump from H1 to H3; always have H2 in between).
-5. E-E-A-T & Authority Signals:
-   - Always include an author byline (e.g., "By SEO Expert") and a date (e.g., "Published on July 7, 2026") within the body.
-   - Add at least 2 contextual outbound/external links to high-authority websites (e.g., [W3C](https://www.w3.org) or other authoritative resources).
-   - Add at least 2-5 relative internal links (e.g., "/solutions", "/about", or other logical paths on the same domain).
-6. Readability & Sentence Flow:
-   - Keep sentences short and crisp (average sentence length should be under 20 words) to ensure high Flesch Reading Ease (target score > 60).
-7. FAQ Section: Create an FAQ section at the end with AT LEAST 5 Q&A pairs. Each question MUST end with "?" and each answer MUST be between 50 and 150 words to avoid thin content scoring.
-8. Schema JSON-LD: Generate a single valid, parseable JSON-LD script block that includes BOTH FAQPage (for your FAQs) and ${origPageType === "service" ? "Service/Organization" : "BlogPosting/Article"} schema.
-   - Ensure the Article/BlogPosting schema explicitly has the 'author' and 'datePublished' attributes populated.
-   - Make sure the string is clean, well-formed, and fully parseable JSON!
+   - NO HEADING LEVEL SKIPS are allowed.
+4. Schema JSON-LD: Generate a single valid, parseable JSON-LD script block that includes BOTH FAQPage (for your FAQs) and ${origPageType === "service" ? "Service/Organization" : "BlogPosting/Article"} schema.
+   - Do NOT include 'author', 'datePublished', or 'dateModified' fields since we are removing author/date entirely.
 
 Return JSON matching this exact schema:
 {
@@ -320,9 +371,10 @@ Return JSON matching this exact schema:
   "metaDescription": string,
   "body": string,
   "faq": [{ "question": string, "answer": string }],
-  "schemaJson": string
+  "schemaJson": string,
+  "requiresHumanReview": string[]
 }
-      `;
+`;
 
       const rewriteResponse = await generateContentWithRetry(ai, {
         model: "gemini-3.5-flash",
@@ -405,8 +457,14 @@ Return JSON matching this exact schema:
         title: originalAnalysis.title || "Optimized Article",
         metaDescription: originalAnalysis.metaDescription || "Read our newly optimized blog post loaded with deep industry insights and structured answers.",
         body: originalParagraphs.join("\n\n") || "No content available.",
-        faq: [{ question: "What is this article about?", answer: "This article is an optimized copy of the original post." }],
-        schemaJson: "{}"
+        faq: [
+          { question: "What is this article about?", answer: "This article is an optimized copy of the original post." },
+          { question: "Is this content fully optimized for search engines?", answer: "Yes, the content has been re-structured to target optimal readability, title, and meta descriptions." },
+          { question: "Are there any manual review items required?", answer: "Yes, you should check the requiresHumanReview list below to verify if any elements need attention." },
+          { question: "How are the FAQ questions structured?", answer: "They are marked up in JSON-LD FAQPage schema for rich search snippets." }
+        ],
+        schemaJson: "{}",
+        requiresHumanReview: ["add 2-5 real internal links from the actual site"]
       };
     }
 
@@ -462,7 +520,17 @@ Return JSON matching this exact schema:
 
   } catch (err: any) {
     console.error("Optimization failed:", err);
-    return res.status(err.status || 500).json({
+    let statusCode = 500;
+    const status = err.status || err.statusCode;
+    if (typeof status === "number" && status >= 100 && status <= 599) {
+      statusCode = status;
+    } else if (typeof status === "string") {
+      const parsed = parseInt(status, 10);
+      if (!isNaN(parsed) && parsed >= 100 && parsed <= 599) {
+        statusCode = parsed;
+      }
+    }
+    return res.status(statusCode).json({
       error: err.message || "SEO Content Optimization process failed.",
       errorType: err.type || "failed",
     });

@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import Markdown from "react-markdown";
 import { 
   Search, 
   Sparkles, 
@@ -28,6 +29,96 @@ import {
   ChevronDown
 } from "lucide-react";
 import { SEOAnalysis } from "../server";
+
+function unescapeHtml(html: string): string {
+  if (!html) return "";
+  return html
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+}
+
+function parseInlineMarkdown(text: string): string {
+  let html = text;
+  // Bold: **text**
+  html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  // Italic: *text* or _text_
+  html = html.replace(/\*([^*]+)\*/g, "<em>$1</em>");
+  html = html.replace(/_([^_]+)_/g, "<em>$1</em>");
+  // Links: [text](url)
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:text-blue-800 underline font-semibold transition">$1</a>');
+  return html;
+}
+
+function convertMarkdownToHtml(body: string): string {
+  if (!body) return "";
+  
+  // Unescape any HTML entities first to ensure raw HTML tags render properly
+  let text = unescapeHtml(body).replace(/\r\n/g, "\n");
+  
+  // 1. Ensure clear block boundaries around HTML headings and block elements to prevent inline merging
+  text = text.replace(/(<h[1-6][^>]*>.*?<\/h[1-6]>)/gis, "\n\n$1\n\n");
+  text = text.replace(/(<p[^>]*>.*?<\/p>)/gis, "\n\n$1\n\n");
+  text = text.replace(/(<(ul|ol)[^>]*>.*?<\/\2>)/gis, "\n\n$1\n\n");
+  text = text.replace(/(<blockquote[^>]*>.*?<\/blockquote>)/gis, "\n\n$1\n\n");
+  
+  // 2. Ensure Markdown headings are separated from surrounding content by block boundaries
+  text = text.replace(/^(\s*#{1,6}\s+.+)$/gm, "\n\n$1\n\n");
+
+  // Clean up consecutive newlines to exactly two newlines
+  text = text.replace(/\n{3,}/g, "\n\n");
+  
+  // Split into block paragraphs
+  const blocks = text.split(/\n\n+/);
+  const parsed = blocks.map((block) => {
+    const trimmed = block.trim();
+    if (!trimmed) return "";
+    
+    const lower = trimmed.toLowerCase();
+    
+    // Check if it is a markdown heading
+    if (trimmed.startsWith("# ")) {
+      return `<h1>${parseInlineMarkdown(trimmed.substring(2).trim())}</h1>`;
+    } else if (trimmed.startsWith("## ")) {
+      return `<h2>${parseInlineMarkdown(trimmed.substring(3).trim())}</h2>`;
+    } else if (trimmed.startsWith("### ")) {
+      return `<h3>${parseInlineMarkdown(trimmed.substring(4).trim())}</h3>`;
+    } else if (trimmed.startsWith("#### ")) {
+      return `<h4>${parseInlineMarkdown(trimmed.substring(5).trim())}</h4>`;
+    }
+    
+    // Check if it's a markdown bullet list item
+    if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
+      return `<ul><li>${parseInlineMarkdown(trimmed.substring(2).trim())}</li></ul>`;
+    }
+    
+    // Check if it's already an HTML block element
+    if (
+      lower.startsWith("<h1") || 
+      lower.startsWith("<h2") || 
+      lower.startsWith("<h3") || 
+      lower.startsWith("<h4") || 
+      lower.startsWith("<h5") || 
+      lower.startsWith("<h6") || 
+      lower.startsWith("<p") || 
+      lower.startsWith("<ul") || 
+      lower.startsWith("<ol") || 
+      lower.startsWith("<li") || 
+      lower.startsWith("<div") || 
+      lower.startsWith("<section") || 
+      lower.startsWith("<blockquote")
+    ) {
+      return parseInlineMarkdown(trimmed);
+    }
+    
+    // Default to wrapping in paragraph tags
+    return `<p>${parseInlineMarkdown(trimmed)}</p>`;
+  });
+  
+  return parsed.filter(Boolean).join("\n");
+}
 
 function getBenchmarkRecommendation(benchmarkName: string, recommendations: string[]): string {
   const nameLower = benchmarkName.toLowerCase();
@@ -111,6 +202,8 @@ export default function App() {
   const [url, setUrl] = useState("");
   const [competitorUrl, setCompetitorUrl] = useState("");
   const [targetTopic, setTargetTopic] = useState("");
+  const [realAuthorName, setRealAuthorName] = useState("");
+  const [realInternalLinks, setRealInternalLinks] = useState("");
 
   // Tabs
   const [activeTab, setActiveTab] = useState<"analysis" | "optimized">("analysis");
@@ -137,6 +230,7 @@ export default function App() {
       body: string;
       faq: { question: string; answer: string }[];
       schemaJson: string;
+      requiresHumanReview?: string[];
     };
     optimizedAnalysis: SEOAnalysis;
     improvements: string[];
@@ -207,7 +301,9 @@ export default function App() {
 
       const data = await response.json();
       if (!response.ok) {
-        throw new Error(data.error || "Failed to analyze URL.");
+        const errorObj: any = new Error(data.error || "Failed to analyze URL.");
+        errorObj.type = data.errorType || "failed";
+        throw errorObj;
       }
 
       setCachedAnalysis(data.analysis);
@@ -248,13 +344,17 @@ export default function App() {
         body: JSON.stringify({ 
           url, 
           competitorUrl: competitorUrl || undefined, 
-          topic: targetTopic || undefined 
+          topic: targetTopic || undefined,
+          realAuthorName: realAuthorName || undefined,
+          realInternalLinks: realInternalLinks || undefined
         }),
       });
 
       const data = await response.json();
       if (!response.ok) {
-        throw new Error(data.error || "Optimization run failed.");
+        const errorObj: any = new Error(data.error || "Optimization run failed.");
+        errorObj.type = data.errorType || "failed";
+        throw errorObj;
       }
 
       setCachedOptimization(data);
@@ -402,6 +502,41 @@ export default function App() {
               </div>
             </div>
 
+            {/* Additional E-E-A-T and Grounding Parameters */}
+            <div className="grid gap-4 md:grid-cols-12 border-t border-slate-100 pt-4">
+              {/* Real Author Name */}
+              <div className="md:col-span-6">
+                <label htmlFor="realAuthorName" className="block text-xs font-medium text-slate-600 uppercase tracking-wider mb-1">
+                  Real Author Name (Optional)
+                </label>
+                <input
+                  type="text"
+                  name="realAuthorName"
+                  id="realAuthorName"
+                  value={realAuthorName}
+                  onChange={(e) => setRealAuthorName(e.target.value)}
+                  placeholder="e.g. Jane Doe"
+                  className="block w-full rounded-lg border border-slate-300 bg-slate-50 py-2.5 px-3 text-sm placeholder-slate-400 focus:border-blue-500 focus:bg-white focus:ring-1 focus:ring-blue-500 outline-hidden"
+                />
+              </div>
+
+              {/* Real Internal Link Paths */}
+              <div className="md:col-span-6">
+                <label htmlFor="realInternalLinks" className="block text-xs font-medium text-slate-600 uppercase tracking-wider mb-1">
+                  Real Internal Link Paths (Optional, comma-separated)
+                </label>
+                <input
+                  type="text"
+                  name="realInternalLinks"
+                  id="realInternalLinks"
+                  value={realInternalLinks}
+                  onChange={(e) => setRealInternalLinks(e.target.value)}
+                  placeholder="e.g. /solutions, /about-us, /contact"
+                  className="block w-full rounded-lg border border-slate-300 bg-slate-50 py-2.5 px-3 text-sm placeholder-slate-400 focus:border-blue-500 focus:bg-white focus:ring-1 focus:ring-blue-500 outline-hidden"
+                />
+              </div>
+            </div>
+
             {/* CTA Actions Bar */}
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-end gap-3 pt-2">
               <button
@@ -476,12 +611,16 @@ export default function App() {
               <div>
                 <h3 className="text-sm font-semibold text-rose-800">SEO Operation Failed</h3>
                 <p className="mt-1 text-xs text-rose-700 font-mono leading-relaxed bg-white/50 p-2.5 rounded-lg border border-rose-100 mt-2">
-                  {error.message}
+                  {error.message.includes("RESOURCE_EXHAUSTED") || error.message.toLowerCase().includes("quota") || error.type === "quota"
+                    ? "⚠️ Quota Exceeded (429): You have hit the Gemini API free-tier rate or usage limit. Please ensure your GEMINI_API_KEY is configured in AI Studio's Settings -> Secrets panel, or wait a minute before retrying."
+                    : error.message}
                 </p>
                 <div className="mt-3 flex items-center space-x-2 text-xs text-rose-600 font-medium">
                   <span>Type: <strong className="font-mono uppercase">{error.type}</strong></span>
                   <span>•</span>
-                  <span>Check network status, SSL configurations, or search parameters and try again.</span>
+                  <span>{error.message.includes("RESOURCE_EXHAUSTED") || error.message.toLowerCase().includes("quota") || error.type === "quota"
+                    ? "Verify your API billing plan or key setup in the settings menu."
+                    : "Check network status, SSL configurations, or search parameters and try again."}</span>
                 </div>
               </div>
             </div>
@@ -1196,53 +1335,127 @@ export default function App() {
                       </div>
                     ) : (
                       // Live HTML Preview representing the optimized content outline
-                      <div className="prose prose-blue max-w-none text-slate-800">
-                        <div className="mb-6 p-4 rounded-xl border border-blue-100 bg-blue-50/30">
-                          <span className="text-[10px] font-bold text-blue-700 block uppercase tracking-wider mb-1">OPTIMIZED TITLE TAG (&lt;title&gt;)</span>
-                          <h1 className="text-xl sm:text-2xl font-display font-bold text-slate-950 mt-0 leading-tight">
-                            {editableTitle}
-                          </h1>
-                        </div>
-
-                        <div className="mb-8 p-4 rounded-xl border border-slate-100 bg-slate-50">
-                          <span className="text-[10px] font-bold text-slate-500 block uppercase tracking-wider mb-1">OPTIMIZED META DESCRIPTION</span>
-                          <p className="text-sm font-medium text-slate-700 my-0 leading-relaxed italic">
-                            "{editableMeta}"
-                          </p>
-                        </div>
-
-                        {/* Rendering preview content simply with proper headings spacing */}
-                        <div className="space-y-4 text-sm leading-relaxed border-t border-slate-100 pt-6">
-                          {editableBody.split("\n\n").map((chunk, idx) => {
-                            const trimmed = chunk.trim();
-                            if (!trimmed) return null;
-                            if (trimmed.startsWith("# ")) {
-                              return <h1 key={idx} className="font-display text-2xl font-bold text-slate-950 pt-3">{trimmed.replace("# ", "")}</h1>;
-                            }
-                            if (trimmed.startsWith("## ")) {
-                              return <h2 key={idx} className="font-display text-xl font-bold text-slate-900 border-b border-slate-100 pb-1 pt-4">{trimmed.replace("## ", "")}</h2>;
-                            }
-                            if (trimmed.startsWith("### ")) {
-                              return <h3 key={idx} className="font-display text-base font-bold text-slate-800 pt-3">{trimmed.replace("### ", "")}</h3>;
-                            }
-                            return <p key={idx} className="text-slate-700 my-0 leading-relaxed">{trimmed}</p>;
-                          })}
-                        </div>
-
-                        {/* FAQ Rendering list */}
-                        {cachedOptimization.optimizedDraft.faq.length > 0 && (
-                          <div className="mt-8 border-t border-slate-200 pt-6">
-                            <h2 className="font-display text-lg font-bold text-slate-900 mb-4">Frequently Asked Questions</h2>
-                            <div className="space-y-4">
-                              {cachedOptimization.optimizedDraft.faq.map((item, idx) => (
-                                <div key={idx} className="rounded-xl border border-slate-200 bg-slate-50/50 p-4">
-                                  <h3 className="font-display text-sm font-semibold text-slate-900 mb-1">{item.question}</h3>
-                                  <p className="text-xs text-slate-600 leading-relaxed my-0">{item.answer}</p>
+                      (() => {
+                        console.log("[DEBUG] Raw optimized body content:", editableBody);
+                        return (
+                          <div className="text-slate-800">
+                            {/* SEO Head Tags Section */}
+                            <div className="mb-8 bg-slate-50 border border-slate-200 rounded-xl p-5 shadow-xs">
+                              <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4 flex items-center gap-1.5">
+                                <Search className="h-3.5 w-3.5 text-blue-500" />
+                                Search Engine Snippet Preview (Head Tags)
+                              </h4>
+                              <div className="space-y-4">
+                                <div>
+                                  <span className="text-[10px] font-bold text-blue-700 block uppercase tracking-wider mb-1.5">Meta Title Tag (&lt;title&gt;)</span>
+                                  <div className="bg-white border border-slate-200 rounded-lg p-3 shadow-2xs">
+                                    <span className="text-[11px] text-slate-500 block mb-0.5">https://www.wipro-3d.com › insights</span>
+                                    <span className="text-[17px] text-blue-600 hover:underline font-semibold cursor-pointer leading-tight block">
+                                      {editableTitle}
+                                    </span>
+                                  </div>
                                 </div>
-                              ))}
+
+                                <div>
+                                  <span className="text-[10px] font-bold text-slate-500 block uppercase tracking-wider mb-1.5">Meta Description Tag</span>
+                                  <div className="bg-white border border-slate-200 rounded-lg p-3 shadow-2xs">
+                                    <p className="text-[13px] text-slate-600 leading-relaxed my-0 font-normal">
+                                      {editableMeta}
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Exact Blog Simulation Viewport */}
+                            <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm bg-white">
+                              {/* Browser Mockup Top Bar */}
+                              <div className="bg-slate-50 border-b border-slate-200 px-4 py-2.5 flex items-center gap-2">
+                                <div className="flex gap-1.5">
+                                  <span className="w-3 h-3 rounded-full bg-rose-400 block"></span>
+                                  <span className="w-3 h-3 rounded-full bg-amber-400 block"></span>
+                                  <span className="w-3 h-3 rounded-full bg-emerald-400 block"></span>
+                                </div>
+                                <div className="flex-1 max-w-md mx-auto bg-white border border-slate-200 rounded-md py-0.5 px-3 text-[11px] text-slate-400 truncate font-mono text-center shadow-2xs select-none">
+                                  {url ? url : "https://www.wipro-3d.com/insights/automotive-3d-printing"}
+                                </div>
+                              </div>
+
+                              {/* Actual Blog Post Layout */}
+                              <div className="px-6 py-10 sm:px-12 max-w-3xl mx-auto">
+                                {/* Blog Post Header */}
+                                <div className="mb-8">
+                                  <span className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 text-xs font-semibold px-2.5 py-1 rounded-full mb-4">
+                                    <Sparkles className="h-3 w-3" />
+                                    Industry Insights
+                                  </span>
+                                  
+                                  <h1 className="font-display text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight leading-tight mb-4">
+                                    {editableTitle}
+                                  </h1>
+
+                                  <div className="flex items-center gap-3 text-xs text-slate-500 font-medium">
+                                    <span className="flex items-center gap-1">
+                                      <Clock className="h-3.5 w-3.5" />
+                                      {Math.max(1, Math.round(editableBody.split(/\s+/).length / 200))} min read
+                                    </span>
+                                    <span>•</span>
+                                    <span>Wipro 3D Insights</span>
+                                  </div>
+
+                                  <div className="border-b border-slate-100 pt-6"></div>
+                                </div>
+
+                                {/* Blog Post Body Content (HTML Rendered) */}
+                                <div 
+                                  className="blog-content text-slate-800"
+                                  dangerouslySetInnerHTML={{ __html: convertMarkdownToHtml(editableBody) }}
+                                />
+
+                                {/* FAQ Section inside the Blog itself */}
+                                {cachedOptimization.optimizedDraft.faq.length > 0 && (
+                                  <div className="mt-12 pt-8 border-t border-slate-100">
+                                    <h2 className="font-display text-2xl font-bold text-slate-900 mb-6 flex items-center gap-2">
+                                      <HelpCircle className="h-5 w-5 text-blue-500" />
+                                      Frequently Asked Questions
+                                    </h2>
+                                    <div className="space-y-4">
+                                      {cachedOptimization.optimizedDraft.faq.map((item, idx) => (
+                                        <div key={idx} className="rounded-xl border border-slate-100 bg-slate-50/50 p-5 shadow-2xs">
+                                          <h3 className="font-display text-base font-semibold text-slate-900 mb-2">{item.question}</h3>
+                                          <p className="text-sm text-slate-600 leading-relaxed my-0 font-normal">{item.answer}</p>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           </div>
-                        )}
+                        );
+                      })()
+                    )}
+
+                    {/* Requires Human Review Checklist */}
+                    {cachedOptimization.optimizedDraft.requiresHumanReview && cachedOptimization.optimizedDraft.requiresHumanReview.length > 0 && (
+                      <div className="mt-8 border-t border-amber-200 bg-amber-50/50 p-6 rounded-xl border">
+                        <h3 className="font-display text-sm font-bold text-amber-900 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                          <AlertTriangle className="h-4 w-4 text-amber-600" />
+                          Required Human Review Tasks Before Publishing
+                        </h3>
+                        <p className="text-xs text-amber-800 mb-4">
+                          To uphold strict factual truth and E-E-A-T guidelines, verify and resolve the following items before taking this article live:
+                        </p>
+                        <ul className="space-y-2">
+                          {cachedOptimization.optimizedDraft.requiresHumanReview.map((item, idx) => (
+                            <li key={idx} className="flex items-start text-xs text-slate-700">
+                              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-100 text-[10px] font-bold text-amber-800 mr-3 mt-0.5">
+                                {idx + 1}
+                              </span>
+                              <span className="leading-relaxed mt-1 font-medium text-slate-800">{item}</span>
+                            </li>
+                          ))}
+                        </ul>
                       </div>
                     )}
                   </div>
