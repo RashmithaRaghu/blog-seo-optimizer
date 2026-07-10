@@ -139,8 +139,17 @@ export async function fetchRobotsTxt(blogUrl: string): Promise<string | null> {
   return null;
 }
 
+// In-memory cache for PageSpeed Insights to keep score calculations stable and identical between runs
+const pageSpeedCache = new Map<string, { score: number; lcp: string; cls: string } | null>();
+
 // Fetch PageSpeed Insights data
 export async function fetchPageSpeedData(url: string): Promise<{ score: number; lcp: string; cls: string } | null> {
+  // Check in-memory cache first
+  if (pageSpeedCache.has(url)) {
+    console.log(`[Cache Hit] Returning cached PageSpeed results for URL: ${url}`);
+    return pageSpeedCache.get(url)!;
+  }
+
   const apiKey = process.env.PAGESPEED_API_KEY;
   if (!apiKey) {
     console.warn("PAGESPEED_API_KEY environment variable is not defined.");
@@ -162,6 +171,7 @@ export async function fetchPageSpeedData(url: string): Promise<{ score: number; 
     clearTimeout(timeoutId);
     if (!res.ok) {
       console.warn(`PageSpeed API returned status: ${res.status}`);
+      pageSpeedCache.set(url, null); // cache failure to prevent repeated timeouts in subsequent steps
       return null;
     }
     const data = await res.json();
@@ -170,16 +180,20 @@ export async function fetchPageSpeedData(url: string): Promise<{ score: number; 
     const cls = data?.lighthouseResult?.audits?.["cumulative-layout-shift"]?.displayValue || "N/A";
     
     if (typeof perfScore === "number") {
-      return {
+      const result = {
         score: Math.round(perfScore * 100),
         lcp,
         cls
       };
+      pageSpeedCache.set(url, result);
+      return result;
     }
+    pageSpeedCache.set(url, null);
     return null;
   } catch (err: any) {
     clearTimeout(timeoutId);
     console.warn("Failed to fetch PageSpeed data:", err?.message || err);
+    pageSpeedCache.set(url, null);
     return null;
   }
 }
@@ -259,11 +273,22 @@ export function calculateFleschReadingEase(text: string): { score: number; avgSe
   const avgSentenceLength = wordCount / sentenceCount;
   const avgSyllablesPerWord = totalSyllables / wordCount;
 
-  let score = 206.835 - 1.015 * avgSentenceLength - 84.6 * avgSyllablesPerWord;
-  score = Math.max(0, Math.min(100, score));
+  const rawScore = 206.835 - 1.015 * avgSentenceLength - 84.6 * avgSyllablesPerWord;
+  const score = Math.max(0, Math.min(100, rawScore));
+  const roundedScore = Math.round(score);
+
+  if (roundedScore === 0 && wordCount > 50) {
+    console.warn("[FLESCH SANITY CHECK] Flesch Reading Ease scored exactly 0 but wordCount is " + wordCount + ". Intermediate values:", {
+      sentenceCount,
+      totalSyllables,
+      avgSentenceLength,
+      avgSyllablesPerWord,
+      rawScore
+    });
+  }
 
   return {
-    score: Math.round(score),
+    score: roundedScore,
     avgSentenceLength: Math.round(avgSentenceLength * 10) / 10
   };
 }
@@ -716,7 +741,7 @@ export async function parseHtmlAndAnalyze(
     score: b2Score,
     maxScore: 10,
     details: schemaStatus === "Present & Valid" ? `Valid structural schema (${foundSchemaTypes.join(", ") || "Generic"}).` : `Schema status: ${schemaStatus}`,
-    status: b2Score >= 8 ? "Optimized" : (b2Score > 0 ? "Needs Improvement" : "Critical"),
+    status: b2Score === 10 ? "Optimized" : (b2Score >= 7 ? "Needs Improvement" : "Critical"),
   });
 
   // Benchmark 3: Content Depth (Word Count vs. Target) (max 10)
@@ -749,7 +774,7 @@ export async function parseHtmlAndAnalyze(
     score: b4Score,
     maxScore: 8,
     details: `H1s: ${h1s.length}. Skip levels: ${headingSkips.length}. Heading lengths out-of-bounds (H2: ${h2TooLongOrShortCount}, H3: ${h3TooLongOrShortCount}).`,
-    status: b4Score >= 6 ? "Optimized" : (b4Score >= 3 ? "Needs Improvement" : "Critical"),
+    status: b4Score === 8 ? "Optimized" : (b4Score >= 4 ? "Needs Improvement" : "Critical"),
   });
 
   // Benchmark 5: Lead Magnet & Conversions (max 4)
@@ -873,7 +898,7 @@ export async function parseHtmlAndAnalyze(
     score: b12Score,
     maxScore: 5,
     details: `Sitemap in Robots.txt: ${sitemapDeclared ? "Yes" : "No"}, Robots tag: ${robotsStatus || "Missing"}.`,
-    status: b12Score >= 3 ? "Optimized" : "Critical",
+    status: b12Score === 5 ? "Optimized" : (b12Score >= 3 ? "Needs Improvement" : "Critical"),
   });
 
   // Benchmark 13: Readability & Flow Ease (max 5)
@@ -926,7 +951,7 @@ export async function parseHtmlAndAnalyze(
   if (finalPageSpeed) {
     b15Score = Math.round((finalPageSpeed.score / 100) * 8);
     pageSpeedDetails = `Performance Score: ${finalPageSpeed.score}/100. LCP: ${finalPageSpeed.lcp}, CLS: ${finalPageSpeed.cls}.`;
-    pageSpeedStatus = b15Score >= 7 ? "Optimized" : (b15Score >= 4 ? "Needs Improvement" : "Critical");
+    pageSpeedStatus = b15Score === 8 ? "Optimized" : (b15Score >= 4 ? "Needs Improvement" : "Critical");
   }
 
   benchmarks.push({
@@ -1483,8 +1508,24 @@ export function buildHtmlFromDraft(draft: { title: string; metaDescription: stri
       <meta name="description" content="${draft.metaDescription}">
       <meta name="viewport" content="width=device-width, initial-scale=1">
       <link rel="canonical" href="${url}">
+      <meta name="robots" content="index, follow">
       <meta name="author" content="SEO Expert">
       <meta name="date" content="2026-07-07">
+      <link rel="icon" href="/favicon.ico">
+      
+      <!-- OpenGraph Metadata -->
+      <meta property="og:title" content="${draft.title}">
+      <meta property="og:description" content="${draft.metaDescription}">
+      <meta property="og:type" content="article">
+      <meta property="og:url" content="${url}">
+      <meta property="og:image" content="/images/seo_strategy_dashboard_overview.jpg">
+      
+      <!-- Twitter Cards Metadata -->
+      <meta name="twitter:card" content="summary_large_image">
+      <meta name="twitter:title" content="${draft.title}">
+      <meta name="twitter:description" content="${draft.metaDescription}">
+      <meta name="twitter:image" content="/images/seo_strategy_dashboard_overview.jpg">
+
       <script type="application/ld+json">
         ${generatedSchemaString}
       </script>

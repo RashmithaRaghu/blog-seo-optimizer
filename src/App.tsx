@@ -574,11 +574,6 @@ export default function App() {
                 }`}
               >
                 AI Optimized Content
-                {cachedOptimization && (
-                  <span className="ml-2 rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-bold text-emerald-600">
-                    {cachedOptimization.optimizedAnalysis.score}/100
-                  </span>
-                )}
               </button>
             </nav>
           </div>
@@ -957,80 +952,6 @@ export default function App() {
                   </button>
                 </div>
 
-                {/* Score Comparison Display */}
-                <div className="grid gap-6 md:grid-cols-2">
-                  {/* Original Score Scorecard */}
-                  <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs flex items-center justify-between">
-                    <div>
-                      <span className="text-xs font-bold uppercase tracking-wider text-slate-500 block mb-1">
-                        Original Audit Score
-                      </span>
-                      <span className="font-display text-3xl font-black text-slate-900 block leading-tight">
-                        {cachedOptimization.originalAnalysis.score}/100
-                      </span>
-                      <span className="text-[11px] font-semibold text-slate-500 block mt-1">
-                        {optOriginalDisclaimer}
-                      </span>
-                      <span className="text-xs text-slate-500 mt-2 block">
-                        Calculated deterministically from the raw scraped HTML.
-                      </span>
-                    </div>
-                    <div className="h-16 w-16 flex items-center justify-center rounded-full bg-slate-50 border border-slate-200 text-slate-500">
-                      <FileText className="h-8 w-8" />
-                    </div>
-                  </div>
-
-                  {/* Optimized Score Scorecard */}
-                  <div className={`rounded-xl border p-5 shadow-xs flex items-center justify-between ${
-                    cachedOptimization.optimizedAnalysis.score > cachedOptimization.originalAnalysis.score
-                      ? "border-emerald-200 bg-emerald-50/50"
-                      : "border-amber-200 bg-amber-50/50"
-                  }`}>
-                    <div>
-                      <span className={`text-xs font-bold uppercase tracking-wider block mb-1 ${
-                        cachedOptimization.optimizedAnalysis.score > cachedOptimization.originalAnalysis.score
-                          ? "text-emerald-700"
-                          : "text-amber-700"
-                      }`}>
-                        AI Optimized Audit Score
-                      </span>
-                      <span className={`font-display text-3xl font-black block leading-tight ${
-                        cachedOptimization.optimizedAnalysis.score > cachedOptimization.originalAnalysis.score
-                          ? "text-emerald-800"
-                          : "text-amber-800"
-                      }`}>
-                        {cachedOptimization.optimizedAnalysis.score}/100
-                      </span>
-                      <span className={`text-[11px] font-semibold block mt-1 ${
-                        cachedOptimization.optimizedAnalysis.score > cachedOptimization.originalAnalysis.score
-                          ? "text-emerald-600"
-                          : "text-amber-600"
-                      }`}>
-                        {optOptimizedDisclaimer}
-                      </span>
-                      {cachedOptimization.optimizedAnalysis.score > cachedOptimization.originalAnalysis.score ? (
-                        <span className="text-xs text-emerald-700 font-semibold mt-2 block">
-                          Gain: +{cachedOptimization.optimizedAnalysis.score - cachedOptimization.originalAnalysis.score} Points Improved
-                        </span>
-                      ) : (
-                        <span className="text-xs text-amber-700 font-semibold mt-2 block">
-                          Optimization did not improve the score ({cachedOptimization.optimizedAnalysis.score - cachedOptimization.originalAnalysis.score} points)
-                        </span>
-                      )}
-                    </div>
-                    <div className={`h-16 w-16 flex items-center justify-center rounded-full ${
-                      cachedOptimization.optimizedAnalysis.score > cachedOptimization.originalAnalysis.score
-                        ? "bg-emerald-100 text-emerald-600"
-                        : "bg-amber-100 text-amber-600"
-                    }`}>
-                      {cachedOptimization.optimizedAnalysis.score > cachedOptimization.originalAnalysis.score ? (
-                        <CheckCircle2 className="h-10 w-10" />
-                      ) : (
-                        <XCircle className="h-10 w-10" />
-                      )}
-                    </div>
-                  </div>
-                </div>
 
                 {/* Remaining Gaps to Reach Maximum Score Section */}
                 <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-xs space-y-6">
@@ -1040,104 +961,59 @@ export default function App() {
                       Remaining Gaps to Reach Maximum Score
                     </h3>
                     <p className="text-xs text-slate-500 mt-1">
-                      Review the remaining gaps preventing this page from achieving a flawless 100/100 score.
+                      Review the remaining gaps preventing this page from achieving a flawless score.
                     </p>
                   </div>
 
-                  <div className="grid gap-6 md:grid-cols-2">
-                    {/* Category 1: Fixable */}
-                    <div className="space-y-4">
-                      <div className="flex items-center space-x-2 border-b border-slate-100 pb-2">
-                        <span className="flex h-5 w-5 items-center justify-center rounded-md bg-amber-50 text-amber-600">
-                          <Edit3 className="h-3.5 w-3.5" />
-                        </span>
-                        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-900">
-                          Fixable — requires content/structure changes
-                        </h4>
-                      </div>
-
-                      {(() => {
-                        const fixableGaps = cachedOptimization.optimizedAnalysis.benchmarks.filter(
-                          b => b.score < b.maxScore && b.name !== "Page Speed" && b.name !== "Backlinks Planning"
-                        );
-
-                        if (fixableGaps.length === 0) {
-                          return (
-                            <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-4 text-xs text-emerald-800 font-semibold flex items-center gap-2">
-                              <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
-                              <span>No remaining fixable gaps! Content and structure are fully optimized.</span>
-                            </div>
-                          );
-                        }
-
-                        return (
-                          <div className="space-y-3 max-h-[400px] overflow-y-auto pr-1">
-                            {fixableGaps.map((b, idx) => {
-                              const fixNeeded = getBenchmarkRecommendation(
-                                b.name, 
-                                cachedOptimization.optimizedAnalysis.recommendations
-                              );
-                              return (
-                                <div key={idx} className="rounded-xl border border-slate-100 bg-slate-50/50 p-4 space-y-2">
-                                  <div className="flex items-center justify-between">
-                                    <span className="text-xs font-bold text-slate-800">{b.name}</span>
-                                    <span className="font-mono text-xs font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md">
-                                      {b.score} / {b.maxScore}
-                                    </span>
-                                  </div>
-                                  <p className="text-xs text-slate-600 leading-relaxed">
-                                    <strong className="text-slate-800">Fix Needed:</strong> {fixNeeded}
-                                  </p>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        );
-                      })()}
+                  {/* Category 1: Fixable */}
+                  <div className="space-y-4">
+                    <div className="flex items-center space-x-2 border-b border-slate-100 pb-2">
+                      <span className="flex h-5 w-5 items-center justify-center rounded-md bg-amber-50 text-amber-600">
+                        <Edit3 className="h-3.5 w-3.5" />
+                      </span>
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-slate-900">
+                        Fixable — requires content/structure changes
+                      </h4>
                     </div>
 
-                    {/* Category 2: Structurally Capped */}
-                    <div className="space-y-4">
-                      <div className="flex items-center space-x-2 border-b border-slate-100 pb-2">
-                        <span className="flex h-5 w-5 items-center justify-center rounded-md bg-slate-100 text-slate-600">
-                          <Cpu className="h-3.5 w-3.5" />
-                        </span>
-                        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-900">
-                          Structurally capped — requires external API integration
-                        </h4>
-                      </div>
+                    {(() => {
+                      const fixableGaps = cachedOptimization.optimizedAnalysis.benchmarks.filter(
+                        b => b.score < b.maxScore && b.name !== "Page Speed" && b.name !== "Backlinks Planning"
+                      );
 
-                      <div className="rounded-lg bg-blue-50/80 border border-blue-100 p-4 text-xs text-blue-800 leading-relaxed">
-                        <p className="font-semibold mb-1">Google PageSpeed Insights Integrated</p>
-                        Real page performance, Largest Contentful Paint (LCP), and Cumulative Layout Shift (CLS) are dynamically measured using your PageSpeed Insights API key. Backlinks planning still requires a live Moz/Ahrefs API integration to query off-page authority signals.
-                      </div>
-
-                      {(() => {
-                        const cappedGaps = cachedOptimization.optimizedAnalysis.benchmarks.filter(
-                          b => b.name === "Page Speed" || b.name === "Backlinks Planning"
-                        );
-
+                      if (fixableGaps.length === 0) {
                         return (
-                          <div className="space-y-3">
-                            {cappedGaps.map((b, idx) => (
-                              <div key={idx} className="rounded-xl border border-slate-100 bg-slate-50/50 p-4">
-                                <div className="flex items-center justify-between mb-1.5">
+                          <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-4 text-xs text-emerald-800 font-semibold flex items-center gap-2">
+                            <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                            <span>No remaining fixable gaps! Content and structure are fully optimized.</span>
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div className="grid gap-4 sm:grid-cols-2 max-h-[400px] overflow-y-auto pr-1">
+                          {fixableGaps.map((b, idx) => {
+                            const fixNeeded = getBenchmarkRecommendation(
+                              b.name, 
+                              cachedOptimization.optimizedAnalysis.recommendations
+                            );
+                            return (
+                              <div key={idx} className="rounded-xl border border-slate-100 bg-slate-50/50 p-4 space-y-2">
+                                <div className="flex items-center justify-between">
                                   <span className="text-xs font-bold text-slate-800">{b.name}</span>
-                                  <span className="font-mono text-xs font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">
+                                  <span className="font-mono text-xs font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md">
                                     {b.score} / {b.maxScore}
                                   </span>
                                 </div>
-                                <p className="text-xs text-slate-500 leading-relaxed">
-                                  {b.name === "Page Speed" 
-                                    ? "Requires real PageSpeed Insights API key to measure and grade actual Core Web Vitals, server response speed, and asset sizing."
-                                    : "Requires real Ahrefs or Moz API data integration to query live off-page backlink equity and domain authority signals."}
+                                <p className="text-xs text-slate-600 leading-relaxed">
+                                  <strong className="text-slate-800">Fix Needed:</strong> {fixNeeded}
                                 </p>
                               </div>
-                            ))}
-                          </div>
-                        );
-                      })()}
-                    </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
 
@@ -1148,52 +1024,7 @@ export default function App() {
                       <Globe className="h-4 w-4 text-blue-600" />
                       Competitive SEO Gap Audit
                     </h3>
-                    <span className="text-xs font-mono text-slate-500">
-                      Primary Competitor: <strong className="text-blue-600 break-all">{cachedOptimization.competitorUrl || "AI Search Grounding"}</strong>
-                    </span>
                   </div>
-
-                  {/* All Competitors Scored List */}
-                  {cachedOptimization.allCompetitors && cachedOptimization.allCompetitors.length > 0 ? (
-                    <div className="mb-5 space-y-2">
-                      <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Deterministically Scored Search Competitors:</div>
-                      <div className="grid gap-3 sm:grid-cols-3">
-                        {cachedOptimization.allCompetitors.map((comp, idx) => {
-                          let hostname = "Competitor";
-                          try {
-                            hostname = new URL(comp.url).hostname;
-                          } catch {}
-                          return (
-                            <div key={idx} className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs flex flex-col justify-between">
-                              <div>
-                                <div className="font-semibold text-slate-800 truncate mb-1" title={comp.url}>
-                                  {hostname}
-                                </div>
-                                <div className="space-y-1 text-slate-500">
-                                  <div>Word Count: <strong className="text-slate-700">{comp.wordCount} words</strong></div>
-                                  <div>SEO Score: <strong className="text-blue-600">{comp.score} / 100</strong></div>
-                                </div>
-                              </div>
-                              <a 
-                                href={comp.url} 
-                                target="_blank" 
-                                rel="noopener noreferrer" 
-                                className="mt-2.5 text-[10px] font-semibold text-blue-600 hover:text-blue-500 flex items-center gap-0.5 self-start"
-                              >
-                                View Source <ExternalLink className="h-2.5 w-2.5" />
-                              </a>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ) : cachedOptimization.competitorAnalysis ? (
-                    <div className="mb-4 bg-slate-50/80 p-3 rounded-lg border border-slate-100 text-xs text-slate-600 flex flex-wrap items-center justify-between gap-2">
-                      <span>Fetched Competitor: <strong>{new URL(cachedOptimization.competitorUrl).hostname}</strong></span>
-                      <span>Competitor Word Count: <strong>{cachedOptimization.competitorAnalysis.wordCount} words</strong></span>
-                      <span>Competitor Score: <strong>{cachedOptimization.competitorAnalysis.score} / 100</strong></span>
-                    </div>
-                  ) : null}
 
                   <div className="grid gap-4 md:grid-cols-2">
                     <div className="space-y-3 bg-blue-50/30 p-4 rounded-xl border border-blue-100/40">
@@ -1454,53 +1285,7 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Score Comparison Rubric breakdown side by side */}
-                <div className="rounded-xl border border-slate-200 bg-white overflow-hidden shadow-xs">
-                  <div className="bg-slate-50 p-4 border-b border-slate-200">
-                    <h3 className="font-display text-sm font-bold text-slate-900 uppercase tracking-wider">
-                      Side-by-Side Scoring Rubric Verification
-                    </h3>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="min-w-full divide-y divide-slate-200 text-left text-xs">
-                      <thead className="bg-slate-50 font-semibold text-slate-700">
-                        <tr>
-                          <th className="px-6 py-3">Evaluation Rubric Row</th>
-                          <th className="px-6 py-3 text-rose-700">Original Score</th>
-                          <th className="px-6 py-3 text-emerald-700">Optimized Score</th>
-                          <th className="px-6 py-3">Audit Improvement Details</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 bg-white">
-                        {cachedOptimization.originalAnalysis.benchmarks.map((originalB, idx) => {
-                          const optB = cachedOptimization.optimizedAnalysis.benchmarks[idx];
-                          return (
-                            <tr key={idx} className="hover:bg-slate-50/50">
-                              <td className="px-6 py-4 font-semibold text-slate-900">{originalB.name}</td>
-                              <td className="px-6 py-4 font-mono font-bold text-slate-700 bg-rose-50/20">
-                                {originalB.score} / {originalB.maxScore}
-                              </td>
-                              <td className="px-6 py-4 font-mono font-bold text-emerald-800 bg-emerald-50/20">
-                                {optB.score} / {optB.maxScore}
-                              </td>
-                              <td className="px-6 py-4 text-slate-600 max-w-sm leading-normal">
-                                {optB.score > originalB.score ? (
-                                  <span className="text-emerald-700 font-medium font-mono text-[11px]">
-                                    → Improved: {optB.details}
-                                  </span>
-                                ) : (
-                                  <span className="text-slate-500 text-[11px]">
-                                    {optB.details}
-                                  </span>
-                                )}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
+                {/* Score comparison table removed for cleaner interface */}
 
               </div>
             ) : null}

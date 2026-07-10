@@ -33,6 +33,7 @@ export default async function handler(req: any, res: any) {
       fetchPageSpeedData(url).catch(() => null),
     ]);
     const originalAnalysis = await parseHtmlAndAnalyze(mainHtml, url, mainRobotsTxt, pageSpeedData);
+    console.log("[OPTIMIZE DIAGNOSTICS] (a) Original Analysis Score:", originalAnalysis.score);
 
 
     // Extract paragraphs content for rewriting source
@@ -223,6 +224,8 @@ Return JSON matching this exact structure:
     let finalDraft: any = null;
     let finalAnalysis: SEOAnalysis | null = null;
     let attemptsCount = 0;
+    let bestAttemptIndex = 0;
+    let selectionReason = "No attempts successfully ran";
     let autoSearchedUrlsList: string[] = [];
 
     // Detect original page type and word count target
@@ -348,6 +351,7 @@ Return JSON matching this exact schema:
       // Build mock HTML and run deterministic analysis
       const mockHtml = buildHtmlFromDraft(parsedDraft, url);
       const tempAnalysis = await parseHtmlAndAnalyze(mockHtml, url, mainRobotsTxt, pageSpeedData);
+      console.log("[OPTIMIZE DIAGNOSTICS] (b) Attempt #" + attemptsCount + " Score:", tempAnalysis.score);
 
       const hasSubheadings = tempAnalysis.headings.some(h => h.tag === "h2" || h.tag === "h3");
       const hasFAQ = parsedDraft.faq && parsedDraft.faq.length > 0;
@@ -367,19 +371,33 @@ Return JSON matching this exact schema:
         rawOutput: parsedDraft,
       });
 
-      // Check if genuinely improved and meets criteria
-      if (tempAnalysis.score > originalAnalysis.score && hasSubheadings && hasFAQ && tempAnalysis.headingSkips.length === 0 && hasMetaDesc) {
-        finalDraft = parsedDraft;
-        finalAnalysis = tempAnalysis;
-        break; // score successfully improved, stop!
-      } else {
-        // Cache this as our best fallback so far in case we run out of retries, prioritizing having a meta description
-        if (!finalDraft || (hasMetaDesc && (!finalAnalysis || tempAnalysis.score > finalAnalysis.score))) {
+      // Check if genuinely improved, valid, and choose the highest-scoring candidate
+      const isValid = hasSubheadings && hasFAQ && tempAnalysis.headingSkips.length === 0 && hasMetaDesc;
+      if (isValid) {
+        if (!finalAnalysis || tempAnalysis.score > finalAnalysis.score) {
+          console.log(`[Attempt #${attemptsCount}] Found a better valid draft with score: ${tempAnalysis.score} (previous best: ${finalAnalysis ? finalAnalysis.score : "None"}). Caching...`);
           finalDraft = parsedDraft;
           finalAnalysis = tempAnalysis;
+          bestAttemptIndex = attemptsCount;
+          selectionReason = `Attempt #${attemptsCount} is fully valid and has the highest score of ${tempAnalysis.score}`;
+        }
+        // If we've achieved a stellar score, we can break early
+        if (tempAnalysis.score >= 84) {
+          console.log(`[Attempt #${attemptsCount}] Achieved near-perfect target score: ${tempAnalysis.score}. Stopping optimization loop early.`);
+          break;
+        }
+      } else {
+        // Secondary fallback if no valid draft is found yet
+        if (!finalDraft || (!finalAnalysis || tempAnalysis.score > finalAnalysis.score)) {
+          finalDraft = parsedDraft;
+          finalAnalysis = tempAnalysis;
+          bestAttemptIndex = attemptsCount;
+          selectionReason = `Attempt #${attemptsCount} selected as fallback (score: ${tempAnalysis.score}) despite not meeting all validation criteria`;
         }
       }
     }
+
+    console.log("[OPTIMIZE DIAGNOSTICS] (c) Selected Final Attempt: #" + bestAttemptIndex + ". Reason: " + selectionReason);
 
     if (!finalDraft) {
       // Emergency fallback in case all parsing / attempts failed
